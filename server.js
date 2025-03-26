@@ -195,6 +195,10 @@ function checkDatabaseReady(req, res, next) {
 // Apply database check middleware
 app.use(checkDatabaseReady);
 
+app.get('/', (req,res)=>{
+  res.send("backend is running !")
+})
+
 // API endpoint to initialize database with CSV
 app.post('/api/init', async (req, res) => {
   try {
@@ -337,4 +341,10 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log('To initialize the database, place orders.csv in the public folder');
   console.log('and make a POST request to /api/init');
-}); 
+});
+
+
+
+
+
+// scan the functionality of this and create a readme file for this , do not remove the deployed links and add that backend is deployed at :- https://tanmayprojbackend.onrender.com 
