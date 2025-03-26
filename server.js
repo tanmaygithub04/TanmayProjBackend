@@ -345,6 +345,3 @@ app.listen(PORT, () => {
 
 
 
-
-
-// scan the functionality of this and create a readme file for this , do not remove the deployed links and add that backend is deployed at :- https://tanmayprojbackend.onrender.com 

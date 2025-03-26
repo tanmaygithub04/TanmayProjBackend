@@ -2,6 +2,9 @@
 
 A robust backend service that enables loading CSV data into an in-memory SQLite database and executing SQL queries against it. This tool is perfect for data analysis, testing SQL queries, and working with CSV datasets.
 
+### 
+Backend is hosted on a remote server on reder whose link is https://tanmayprojbackend.onrender.com
+
 ## Features
 
 - **CSV Data Loading**: Load CSV files into an in-memory SQLite database
