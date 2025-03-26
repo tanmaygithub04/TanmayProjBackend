@@ -16,6 +16,10 @@ app.use(express.static('public'));
 // Create a new database (in memory for simplicity, use a file for persistence)
 const db = new sqlite3.Database(':memory:');
 
+// Track database initialization state
+let isDatabaseInitialized = false;
+let isInitializing = false;
+
 // Helper function to execute SQL queries
 function runQuery(query, params = []) {
   return new Promise((resolve, reject) => {
@@ -38,6 +42,34 @@ function inferSchema(headerRow) {
 // Load CSV data into SQLite
 async function loadCSVData(filePath, tableName) {
   try {
+    // If already initializing, wait for it to complete
+    if (isInitializing) {
+      console.log('Database initialization already in progress, waiting...');
+      
+      // Wait until initialization is complete
+      while (isInitializing) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      // If initialization completed successfully, return database info
+      if (isDatabaseInitialized) {
+        console.log('Using already initialized database');
+        const tableInfo = await runQuery(`PRAGMA table_info(${tableName})`);
+        const countResult = await runQuery(`SELECT COUNT(*) as count FROM ${tableName}`);
+        return {
+          tableName,
+          rowCount: countResult[0].count,
+          schema: tableInfo.map(info => ({
+            name: info.name,
+            type: info.type
+          }))
+        };
+      }
+    }
+    
+    // Set initialization flag
+    isInitializing = true;
+    
     console.log(`Loading CSV from ${filePath} into table ${tableName}`);
     
     // Read the first few lines to infer schema
@@ -62,6 +94,7 @@ async function loadCSVData(filePath, tableName) {
     });
     
     if (!headerProcessed || headers.length === 0) {
+      isInitializing = false;
       throw new Error('Failed to process CSV headers');
     }
     
@@ -70,6 +103,8 @@ async function loadCSVData(filePath, tableName) {
     
     // Create table with inferred schema
     const columnDefs = schema.map(col => `${col.name} ${col.type}`).join(', ');
+    
+    // First drop the table to ensure a clean slate
     await runQuery(`DROP TABLE IF EXISTS ${tableName}`);
     await runQuery(`CREATE TABLE ${tableName} (${columnDefs})`);
     
@@ -117,9 +152,14 @@ async function loadCSVData(filePath, tableName) {
           }
           
           console.log(`Loaded ${totalRows} records into ${tableName}`);
+          isDatabaseInitialized = true;
+          isInitializing = false;
           resolve();
         })
-        .on('error', reject);
+        .on('error', (err) => {
+          isInitializing = false;
+          reject(err);
+        });
     });
     
     return {
@@ -128,14 +168,51 @@ async function loadCSVData(filePath, tableName) {
       schema
     };
   } catch (error) {
+    // Reset initialization flags on error
+    isInitializing = false;
     console.error('Error loading CSV data:', error);
     throw error;
   }
 }
 
+// Middleware to check if database is ready
+function checkDatabaseReady(req, res, next) {
+  // Skip check for initialization endpoint
+  if (req.path === '/api/init' || req.path === '/health') {
+    return next();
+  }
+  
+  if (!isDatabaseInitialized) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database not initialized. Please call /api/init endpoint first.'
+    });
+  }
+  
+  next();
+}
+
+// Apply database check middleware
+app.use(checkDatabaseReady);
+
 // API endpoint to initialize database with CSV
 app.post('/api/init', async (req, res) => {
   try {
+    // If database is already initialized and not currently initializing
+    if (isDatabaseInitialized && !isInitializing) {
+      const tableInfo = await runQuery('PRAGMA table_info(orders)');
+      const countResult = await runQuery('SELECT COUNT(*) as count FROM orders');
+      
+      return res.json({
+        success: true,
+        message: `Database already initialized with ${countResult[0].count} rows in table orders`,
+        schema: tableInfo.map(info => ({
+          name: info.name,
+          type: info.type
+        }))
+      });
+    }
+    
     // If file was previously uploaded
     const csvPath = path.join(__dirname, 'public', 'orders.csv');
     
@@ -229,9 +306,35 @@ app.get('/api/schema/:tableName', async (req, res) => {
   }
 });
 
+// Health check endpoint for Render
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    message: 'Server is running',
+    dbInitialized: isDatabaseInitialized,
+    dbInitializing: isInitializing
+  });
+});
+
+// Auto-initialize database if CSV exists
+(async function() {
+  try {
+    const csvPath = path.join(__dirname, 'public', 'orders.csv');
+    if (fs.existsSync(csvPath)) {
+      console.log('Found CSV file, auto-initializing database...');
+      await loadCSVData(csvPath, 'orders');
+      console.log('Database auto-initialization complete');
+    } else {
+      console.log('No CSV file found for auto-initialization');
+    }
+  } catch (error) {
+    console.error('Error during auto-initialization:', error);
+  }
+})();
+
 // Start server
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Server running on port ${PORT}`);
   console.log('To initialize the database, place orders.csv in the public folder');
   console.log('and make a POST request to /api/init');
 }); 
